@@ -1,0 +1,164 @@
+#!/usr/bin/python
+# py 2.7 - OL7
+
+import subprocess
+import sys
+import os
+
+
+class SourceRouteControl():
+    def __init__(self):
+        self.tables = []
+        self.last_num = 0
+        # init
+        self._get_tables()
+
+    def _get_tables(self):
+        with open('/etc/iproute2/rt_tables') as fp:
+            for l in fp.readlines():
+                l = l.strip()
+                if not l or '#' in l: continue
+                if 'unspec' in l: continue
+                if 'local' in l: continue
+                # if 'main' in l: continue
+                if 'default' in l: continue
+                last_num, tname = l.split()
+                self.tables.append(tname)
+            self.last_num = int(last_num)
+
+    def _get_rules(self, tname):
+        rtn = []
+        iprulels = subprocess.check_output(['ip', 'rule', 'ls'])
+        for l in iprulels.split('\n'):
+            l = l.strip()
+            if l and tname in l:
+                s = l.split()
+                rtn.append(s[2])  # source ip
+        return rtn
+
+    def ls_routetable(self, tname, tab=0):
+        iproutels = subprocess.check_output(['ip', 'route', 'ls', 'table', tname])
+        for l in iproutels.split('\n'):
+            print("{}{}".format(' ' * tab, l))
+
+    def add_table(self, tname):
+        # add a row rt_tables
+        # ip add rule xxx lookup xxx
+        pass
+    def del_table(self, tname):
+        pass
+
+    def add_routing(self, tname, routing):
+        pass
+    def del_routing(self, tname, routing):
+        pass
+
+    def rule_exists(self, table, src_ipaddr):
+        for r in self._get_rules(table):
+            if src_ipaddr == r:
+                return True
+        else:
+            return False
+
+    def table_exists(self, tname):
+        return (tname in self.tables)
+
+def print_usage():
+    print("Usege:")
+    print("  {} print".format(sys.argv[0]))
+    print("  {} addtable ext2".format(sys.argv[0]))
+    print("  {} deltable ext2".format(sys.argv[0]))
+    print("  {} addsrc ext2".format(sys.argv[0]))
+    print("  {} delsrc ext2".format(sys.argv[0]))
+    print("  {} addroute ext2 default via 10.10.10.1 dev eth3".format(sys.argv[0]))
+    print("  {} delroute ext2 10.10.10.0/24 dev eth3".format(sys.argv[0]))
+    sys.exit(1)
+
+def print_error(s):
+    # print('Err:')
+    # print('  {}'.format(s))
+    print(s)
+    sys.exit(1)
+
+if __name__ == '__main__':
+    s = SourceRouteControl()
+    if len(sys.argv) == 2:
+        # $0 print
+        cmd = sys.argv[1]
+        if cmd == 'print':
+            for t in s.tables:
+                print('TableName     {}'.format(t))
+                if len(s._get_rules(t)) < 1:
+                    print("{}src [Undefined]".format(' ' * 3))
+                else:
+                    print("{}src {}".format(' ' * 3, ', '.join(s._get_rules(t))))
+                s.ls_routetable(t, tab=5)
+        else:
+            print_usage()
+    elif len(sys.argv) == 3:
+        """
+        # Case:
+        # $0 addtable xxxxx
+        # $0 deltable xxxxx
+        """
+        cmd = sys.argv[1]
+        arg = ' '.join(sys.argv[2:])
+        # print(cmd)
+        # print(arg)
+        if cmd == 'addtable':
+            if s.table_exists(arg):
+                print_error('table[{}] already exists'.format(arg))
+            with open('/etc/iproute2/rt_tables', 'a') as fp:
+                fp.write('{}    {}\n'.format((s.last_num + 1), arg))
+        elif cmd == 'deltable':
+            if not s.table_exists(arg):
+                print_error('table[{}] does not exists'.format(arg))
+            else:
+                buf = ''
+                with open('/etc/iproute2/rt_tables', 'r') as fp:
+                    for l in fp.readlines():
+                        if arg in l: continue
+                        buf += l
+                with open('/etc/iproute2/rt_tables', 'w') as fp:
+                    fp.write(buf)
+        else:
+            print_usage()
+
+    elif len(sys.argv) > 3:
+        """
+        # Case:
+        # $0 addsrc xxx xxxxxxxxxxxxx
+        # $0 delsrc xxx xxxxxxxxxxxxx
+        # $0 addroute xxxxx xx xxxx
+        # $0 delroute xxxxx xx xxxx
+        """
+        cmd = sys.argv[1]
+        table = sys.argv[2]
+        arg = ' '.join(sys.argv[3:])
+        # print(cmd)
+        # print(table)
+        # print(arg)
+        if cmd == 'addsrc':
+            if not s.table_exists(table):
+                print_error('table[{}] does not exists'.format(table))
+            o = '/usr/sbin/ip rule add from {} lookup {}'.format(arg, table)
+            os.system(o)
+        elif cmd == 'delsrc':
+            if not s.table_exists(table):
+                print_error('table[{}] does not exists'.format(table))
+            if not s.rule_exists(table, arg):
+                print_error('Source IP Address[{}] does not exists in table[{}]'.format(arg, table))
+            o = '/usr/sbin/ip rule del from {} lookup {}'.format(arg, table)
+            os.system(o)
+        elif cmd == 'addroute':
+            if not s.table_exists(table):
+                print_error('table[{}] does not exists'.format(table))
+            o = '/usr/sbin/ip route add {} table {}'.format(arg, table)
+            os.system(o)
+        elif cmd == 'delroute':
+            if not s.table_exists(table):
+                print_error('table[{}] does not exists'.format(table))
+            o = '/usr/sbin/ip route del {} table {}'.format(arg, table)
+            os.system(o)
+    else:
+        print_usage()
